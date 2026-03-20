@@ -1,6 +1,0 @@
-TS CHANGES PART 1 of 20
-==============================
-[NEW] --- FILE: .\ajithwebpage\.gitattributes ---
-# Auto detect text files and perform LF normalization
-* text=auto
---- END OF .\ajithwebpage\.gitattributes ---

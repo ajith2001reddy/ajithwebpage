@@ -1,3 +1,0 @@
-TS CHANGES PART 2 of 20
-==============================
-[NEW] --- FILE: .\public\models\astronaut.glb [READ ERROR: 'utf-8' codec can't decode byte 0xf0 in position 2340: invalid continuation byte] ---
