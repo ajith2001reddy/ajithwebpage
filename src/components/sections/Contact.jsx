@@ -18,10 +18,10 @@ export default function Contact() {
             The Nexus
           </p>
           <h2 className="text-5xl md:text-8xl font-bold text-black dark:text-white tracking-tighter leading-none">
-            Let's build <br className="hidden md:block" /> with precision.
+            Let&apos;s build <br className="hidden md:block" /> with precision.
           </h2>
           <p className="text-xl md:text-2xl text-gray-500 dark:text-gray-400 font-normal max-w-2xl mx-auto leading-relaxed">
-            I'm currently open to collaborations, infrastructure engineering roles, and high-impact AI projects. Connect with me directly below.
+            I&apos;m currently open to collaborations, infrastructure engineering roles, and high-impact AI projects. Connect with me directly below.
           </p>
         </motion.div>
 

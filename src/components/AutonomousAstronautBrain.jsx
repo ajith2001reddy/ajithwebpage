@@ -1,5 +1,5 @@
 'use client';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, useCallback } from 'react';
 import { motion } from 'framer-motion';
 
 /**
@@ -109,7 +109,7 @@ export default function AutonomousAstronautBrain() {
     };
 
     // Main AI loop - Smart and adaptive
-    const runAILoop = () => {
+    const runAILoop = useCallback(() => {
         const section = detectCurrentSection();
         const { action, target, status, confidence } = getActionForSection(section);
 
@@ -152,14 +152,14 @@ export default function AutonomousAstronautBrain() {
             status,
             confidence,
         });
-    };
+    }, []); // Empty dependency array as it uses state updates and refs
 
     // Initialize AI loop
     useEffect(() => {
         runAILoop();
         const interval = setInterval(runAILoop, 1200); // Run every 1.2 seconds
         return () => clearInterval(interval);
-    }, []);
+    }, [runAILoop]);
 
     return null;
 }

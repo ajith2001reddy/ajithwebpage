@@ -42,13 +42,13 @@ export default function About() {
 
             <div className="space-y-8 text-xl text-gray-500 dark:text-gray-400 font-normal leading-relaxed max-w-xl">
               <p>
-                I'm a Computer Science graduate student with over 5 years of experience specialized in building <span className="text-black dark:text-white font-semibold">high-performance systems</span> and AI-driven platforms.
+                I&apos;m a Computer Science graduate student with over 5 years of experience specialized in building <span className="text-black dark:text-white font-semibold">high-performance systems</span> and AI-driven platforms.
               </p>
               <p>
                 My approach focuses on the intersection of technical robustness and user-centric architecture. At TCS, I engineered a Denodo data virtualization ecosystem consolidating 50+ sources with zero downtime.
               </p>
               <p>
-                Currently, I'm exploring advanced ML scalability and distributed backend patterns at the University of Bridgeport.
+                Currently, I&apos;m exploring advanced ML scalability and distributed backend patterns at the University of Bridgeport.
               </p>
             </div>
 
