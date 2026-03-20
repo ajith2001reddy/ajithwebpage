@@ -1,483 +1,545 @@
 'use client';
-import React, { useRef, useState, useMemo, useEffect } from 'react';
-import { Canvas, useFrame } from '@react-three/fiber';
-import { Stars, PerspectiveCamera, Html } from '@react-three/drei';
-import * as THREE from 'three';
-import { motion } from 'framer-motion';
+/**
+ * SpaceStage.jsx  –  NASA-grade astronaut scene
+ *
+ * Features:
+ *  • Real .glb astronaut model via useGLTF + auto-scale & NASA-white material override
+ *  • useAnimations clip cross-fading  (walk / idle / float)
+ *  • Physics-based P-controller movement with damping
+ *  • Particle thruster flames  (additive blended Points, emits on 'fly')
+ *  • Welding arc sparks        (additive blended Points, emits on 'repair')
+ *  • Procedural wrench prop    (appears in hand during repair, fades in/out)
+ *  • Dynamic point lights      (visor glow + thruster heat + weld arc)
+ *  • Quadratic Bézier tether cable from anchor to astronaut
+ *  • Slowly-tumbling debris field
+ *  • AnimatePresence thought bubble with per-status fade transitions
+ *  • Astronaut placeholder sphere while GLB is loading
+ */
 
-// Safety tether from anchor point to astronaut
-const Tether = ({ start, end }) => {
+import React, {
+  useRef, useState, useMemo, useEffect, Suspense, useCallback,
+} from 'react';
+import { Canvas, useFrame } from '@react-three/fiber';
+import {
+  Stars, PerspectiveCamera, Html, useGLTF, useAnimations,
+} from '@react-three/drei';
+import * as THREE from 'three';
+import { motion, AnimatePresence } from 'framer-motion';
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   TETHER  –  safety cable from anchor to astronaut
+═══════════════════════════════════════════════════════════════════════════ */
+function Tether({ worldPosRef }) {
   const lineRef = useRef();
-  const v1 = useMemo(() => new THREE.Vector3(), []);
-  const v2 = useMemo(() => new THREE.Vector3(), []);
-  const v3 = useMemo(() => new THREE.Vector3(), []);
+  const ANCHOR = useMemo(() => new THREE.Vector3(-14, 9, -4), []);
+  const mid = useMemo(() => new THREE.Vector3(), []);
+  const end = useMemo(() => new THREE.Vector3(), []);
 
   useFrame(() => {
     if (!lineRef.current) return;
-    v1.set(...start);
-    v2.set(
-      (start[0] + end.x) / 2,
-      (start[1] + end.y) / 2 + 1.2,
-      (start[2] + end.z) / 2
+    end.set(worldPosRef.current.x, worldPosRef.current.y, 0);
+    mid.set(
+      (ANCHOR.x + end.x) * 0.5,
+      (ANCHOR.y + end.y) * 0.5 + 1.8,
+      (ANCHOR.z + end.z) * 0.5,
     );
-    v3.set(end.x, end.y, end.z);
-    const curve = new THREE.QuadraticBezierCurve3(v1, v2, v3);
-    lineRef.current.geometry.setFromPoints(curve.getPoints(50));
+    lineRef.current.geometry.setFromPoints(
+      new THREE.QuadraticBezierCurve3(ANCHOR, mid, end).getPoints(60)
+    );
   });
 
   return (
     <line ref={lineRef}>
       <bufferGeometry />
-      <lineBasicMaterial color="#545456" linewidth={1} transparent opacity={0.5} />
+      <lineBasicMaterial color="#777777" transparent opacity={0.38} linewidth={1} />
     </line>
   );
-};
+}
 
-// ─── ASTRONAUT ────────────────────────────────────────────────────────────────
-const AnimatedAstronaut = ({ hovered, setHovered }) => {
+/* ═══════════════════════════════════════════════════════════════════════════
+   THRUSTER PARTICLES  –  hot exhaust plumes when flying
+═══════════════════════════════════════════════════════════════════════════ */
+function ThrusterParticles({ active, localOffset }) {
+  const ref = useRef();
+  const N = 90;
+  const ages = useRef(new Float32Array(N).map(() => Math.random()));
+  const vels = useRef(new Float32Array(N * 3));
+
+  const geo = useMemo(() => {
+    const g = new THREE.BufferGeometry();
+    const pos = new Float32Array(N * 3).fill(9999);
+    g.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+    return g;
+  }, []);
+
+  const mat = useMemo(() => new THREE.PointsMaterial({
+    color: '#ffaa44',
+    size: 0.042,
+    transparent: true,
+    opacity: 0.88,
+    sizeAttenuation: true,
+    depthWrite: false,
+    blending: THREE.AdditiveBlending,
+  }), []);
+
+  useFrame((_, dt) => {
+    if (!ref.current) return;
+    ref.current.visible = active;
+    if (!active) return;
+
+    const pos = geo.attributes.position.array;
+    const v = vels.current;
+    const [ox, oy, oz] = localOffset;
+
+    for (let i = 0; i < N; i++) {
+      ages.current[i] -= dt * 3;
+      if (ages.current[i] <= 0) {
+        pos[i * 3] = ox + (Math.random() - 0.5) * 0.06;
+        pos[i * 3 + 1] = oy;
+        pos[i * 3 + 2] = oz + (Math.random() - 0.5) * 0.06;
+        v[i * 3] = (Math.random() - 0.5) * 0.02;
+        v[i * 3 + 1] = -(Math.random() * 0.07 + 0.03);
+        v[i * 3 + 2] = (Math.random() - 0.5) * 0.02;
+        ages.current[i] = Math.random() * 0.35 + 0.15;
+      }
+      pos[i * 3] += v[i * 3];
+      pos[i * 3 + 1] += v[i * 3 + 1];
+      pos[i * 3 + 2] += v[i * 3 + 2];
+    }
+    geo.attributes.position.needsUpdate = true;
+  });
+
+  return <points ref={ref} geometry={geo} material={mat} />;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   WELDING SPARKS  –  white-hot sparks during repair
+═══════════════════════════════════════════════════════════════════════════ */
+function WeldingSparks({ active }) {
+  const ref = useRef();
+  const N = 55;
+  const ages = useRef(new Float32Array(N).map(() => Math.random()));
+  const vels = useRef(new Float32Array(N * 3));
+
+  const geo = useMemo(() => {
+    const g = new THREE.BufferGeometry();
+    const pos = new Float32Array(N * 3).fill(9999);
+    g.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+    return g;
+  }, []);
+
+  const mat = useMemo(() => new THREE.PointsMaterial({
+    color: '#ffffff',
+    size: 0.023,
+    transparent: true,
+    opacity: 0.95,
+    sizeAttenuation: true,
+    depthWrite: false,
+    blending: THREE.AdditiveBlending,
+  }), []);
+
+  useFrame((_, dt) => {
+    if (!ref.current) return;
+    ref.current.visible = active;
+    if (!active) return;
+
+    const pos = geo.attributes.position.array;
+    const v = vels.current;
+
+    for (let i = 0; i < N; i++) {
+      ages.current[i] -= dt * 5;
+      if (ages.current[i] <= 0) {
+        pos[i * 3] = 0.42 + (Math.random() - 0.5) * 0.04;
+        pos[i * 3 + 1] = 0.25 + (Math.random() - 0.5) * 0.04;
+        pos[i * 3 + 2] = 0.22;
+        const a = Math.random() * Math.PI * 2;
+        const s = Math.random() * 0.09 + 0.03;
+        v[i * 3] = Math.cos(a) * s;
+        v[i * 3 + 1] = Math.sin(a) * s * 0.5 + 0.03;
+        v[i * 3 + 2] = Math.random() * 0.05;
+        ages.current[i] = Math.random() * 0.2 + 0.08;
+      }
+      pos[i * 3] += v[i * 3] * 0.25;
+      pos[i * 3 + 1] += v[i * 3 + 1] * 0.25 - 0.0015;
+      pos[i * 3 + 2] += v[i * 3 + 2] * 0.25;
+    }
+    geo.attributes.position.needsUpdate = true;
+  });
+
+  return <points ref={ref} geometry={geo} material={mat} />;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   WRENCH PROP  –  procedural hand-tool
+═══════════════════════════════════════════════════════════════════════════ */
+const WRENCH_MAT = new THREE.MeshStandardMaterial({
+  color: '#8a8a8a', metalness: 0.92, roughness: 0.22,
+});
+
+function Wrench() {
+  return (
+    <group position={[0.42, 0.28, 0.18]} rotation={[0.4, 0, -0.5]}>
+      <mesh material={WRENCH_MAT}>
+        <cylinderGeometry args={[0.016, 0.019, 0.3, 8]} />
+      </mesh>
+      <mesh position={[0, 0.175, 0]} material={WRENCH_MAT}>
+        <boxGeometry args={[0.072, 0.038, 0.02]} />
+      </mesh>
+      <mesh position={[0.018, 0.148, 0]} material={WRENCH_MAT}>
+        <boxGeometry args={[0.04, 0.024, 0.018]} />
+      </mesh>
+    </group>
+  );
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   ASTRONAUT GLB  –  main character
+═══════════════════════════════════════════════════════════════════════════ */
+function AstronautGLB({ hovered, setHovered }) {
   const groupRef = useRef();
-  const bodyRef = useRef();
-  const headRef = useRef();
-  const leftArmRef = useRef();
-  const rightArmRef = useRef();
-  const leftLegRef = useRef();
-  const rightLegRef = useRef();
 
-  // Physics refs – never cause React re-renders
-  const posRef = useRef(new THREE.Vector3(0, 0, 0));
-  const targetPosRef = useRef({ x: 0, y: 0 });
-  const velRef = useRef({ x: 0, y: 0 });
+  const { scene, animations } = useGLTF('/models/astronaut.glb');
+  const { actions, names } = useAnimations(animations, groupRef);
+
+  const worldPos = useRef(new THREE.Vector3(0, 0, 0));
+  const targetPos = useRef({ x: 0, y: 0 });
+  const vel = useRef({ x: 0, y: 0 });
   const actionRef = useRef('walk');
   const boostRef = useRef(0);
+  const lastClip = useRef(null);
 
-  // Status text shown in thought bubble (minimal re-renders)
   const [status, setStatus] = useState('👨‍🚀 On patrol...');
+  const [isRepairing, setIsRepairing] = useState(false);
+  const [isFlying, setIsFlying] = useState(false);
 
-  // ── Geometry & Materials (memoised – never re-created) ─────────────────────
-  const geo = useMemo(() => ({
-    body: new THREE.CapsuleGeometry(0.3, 1, 4, 8),
-    head: new THREE.SphereGeometry(0.35, 32, 32),
-    visor: new THREE.SphereGeometry(0.21, 32, 32),
-    limb: new THREE.CapsuleGeometry(0.13, 0.6, 4, 8),
-    hand: new THREE.SphereGeometry(0.13, 16, 16),
-    boot: new THREE.BoxGeometry(0.22, 0.18, 0.28),
-    jetpack: new THREE.BoxGeometry(0.35, 0.7, 0.22),
-    thruster: new THREE.SphereGeometry(0.11, 16, 16),
-  }), []);
-
-  const mat = useMemo(() => ({
-    suit: new THREE.MeshStandardMaterial({ color: '#e8e8e8', metalness: 0.3, roughness: 0.8 }),
-    helmet: new THREE.MeshStandardMaterial({ color: '#d4d4d4', metalness: 0.6, roughness: 0.4 }),
-    visor: new THREE.MeshStandardMaterial({ color: '#001a4d', emissive: '#0071E3', emissiveIntensity: 0.6, transparent: true, opacity: 0.85 }),
-    glove: new THREE.MeshStandardMaterial({ color: '#e5a700', metalness: 0.5, roughness: 0.6 }),
-    boot: new THREE.MeshStandardMaterial({ color: '#1a1a1a', metalness: 0.7, roughness: 0.3 }),
-    jetpack: new THREE.MeshStandardMaterial({ color: '#2a2a2a', metalness: 0.6, roughness: 0.5 }),
-    thruster: new THREE.MeshStandardMaterial({ color: '#ff6b35', emissive: '#ff4500', emissiveIntensity: 0.7 }),
-  }), []);
-
-  // ── Event listeners ──────────────────────────────────────────────────────
+  /* ── NASA-white material override ──────────────────────────────────── */
   useEffect(() => {
-    const onAutonomous = (e) => {
-      const { action, target, status: s } = e.detail;
-      if (action) actionRef.current = action;
-      if (target) targetPosRef.current = target;
+    if (!scene) return;
+
+    // Auto-scale to ~2.4 world units
+    const box = new THREE.Box3().setFromObject(scene);
+    const size = box.getSize(new THREE.Vector3());
+    const maxDim = Math.max(size.x, size.y, size.z);
+    if (maxDim > 0) scene.scale.setScalar(2.4 / maxDim);
+
+    // Re-centre
+    const box2 = new THREE.Box3().setFromObject(scene);
+    const ctr = box2.getCenter(new THREE.Vector3());
+    scene.position.set(-ctr.x, -box2.min.y, -ctr.z);
+
+    scene.traverse((child) => {
+      if (!child.isMesh) return;
+      child.castShadow = child.receiveShadow = true;
+      const n = child.name.toLowerCase();
+
+      if (/visor|glass|faceplate|lens|shield/.test(n)) {
+        child.material = new THREE.MeshStandardMaterial({
+          color: '#c8a020', metalness: 0.98, roughness: 0.02, envMapIntensity: 2.5,
+        });
+      } else if (/boot|shoe|foot/.test(n)) {
+        child.material = new THREE.MeshStandardMaterial({
+          color: '#d8d8d8', metalness: 0.08, roughness: 0.92,
+        });
+      } else if (/glove|hand|palm/.test(n)) {
+        child.material = new THREE.MeshStandardMaterial({
+          color: '#dedede', metalness: 0.05, roughness: 0.88,
+        });
+      } else if (/pack|backpack|mmu|plss|tank|thruster/.test(n)) {
+        child.material = new THREE.MeshStandardMaterial({
+          color: '#cccccc', metalness: 0.55, roughness: 0.52,
+        });
+      } else if (/badge|patch|label|insignia/.test(n)) {
+        child.material = new THREE.MeshStandardMaterial({
+          color: '#c8a020', emissive: '#906010', emissiveIntensity: 0.4,
+          metalness: 0.7, roughness: 0.3,
+        });
+      } else {
+        // Main EMU suit fabric – off-white, fabric-rough
+        child.material = new THREE.MeshStandardMaterial({
+          color: new THREE.Color(0.93, 0.93, 0.93),
+          metalness: 0.0,
+          roughness: 0.86,
+        });
+      }
+    });
+  }, [scene]);
+
+  /* ── Clip crossfade ────────────────────────────────────────────────── */
+  const playClip = useCallback((keywords, fade = 0.4) => {
+    if (!names.length) return;
+    const found =
+      keywords.flatMap(kw => names.filter(n => n.toLowerCase().includes(kw))).find(Boolean)
+      ?? names[0];
+
+    if (found === lastClip.current) return;
+
+    if (lastClip.current && actions[lastClip.current]) {
+      actions[lastClip.current].fadeOut(fade);
+    }
+    if (actions[found]) {
+      actions[found].reset().setLoop(THREE.LoopRepeat, Infinity).fadeIn(fade).play();
+    }
+    lastClip.current = found;
+  }, [actions, names]);
+
+  /* ── Events from Brain ──────────────────────────────────────────────── */
+  useEffect(() => {
+    const onAction = ({ detail }) => {
+      const { action, target, status: s } = detail;
+      if (action) {
+        actionRef.current = action;
+        setIsRepairing(action === 'repair');
+        setIsFlying(action === 'fly');
+      }
+      if (target) targetPos.current = target;
       if (s) setStatus(s);
     };
     const onBoost = () => { boostRef.current = 1; };
 
-    window.addEventListener('astronaut-autonomous-action', onAutonomous);
+    window.addEventListener('astronaut-autonomous-action', onAction);
     window.addEventListener('astro-boost', onBoost);
     return () => {
-      window.removeEventListener('astronaut-autonomous-action', onAutonomous);
+      window.removeEventListener('astronaut-autonomous-action', onAction);
       window.removeEventListener('astro-boost', onBoost);
     };
   }, []);
 
-  // ── Frame loop ────────────────────────────────────────────────────────────
+  /* ── Frame loop ─────────────────────────────────────────────────────── */
   useFrame((state, delta) => {
+    const dt = Math.min(delta, 0.05);
     const t = state.clock.getElapsedTime();
     if (!groupRef.current) return;
 
-    // Clamp delta so a tab-switch doesn't cause a huge jump
-    const dt = Math.min(delta, 0.05);
-
-    // ── 1. SMOOTH POSITIONAL MOVEMENT ──────────────────────────────────────
-    const txWorld = targetPosRef.current.x * 5;
-    const tyWorld = targetPosRef.current.y * 3;
-
-    velRef.current.x += (txWorld - posRef.current.x) * dt * 1.8;
-    velRef.current.y += (tyWorld - posRef.current.y) * dt * 1.8;
-    velRef.current.x *= Math.pow(0.90, dt * 60);
-    velRef.current.y *= Math.pow(0.90, dt * 60);
-    posRef.current.x += velRef.current.x;
-    posRef.current.y += velRef.current.y;
-
-    // ── 2. BASE LAYER: breathing (always present, barely visible) ──────────
-    const breathe = Math.sin(t * 0.9) * 0.012;   // ~54 breaths/min – realistic
-
-    // ── 3. ACTION ANIMATIONS ───────────────────────────────────────────────
     const action = actionRef.current;
 
-    // Shorthand lerp helper
-    const lr = (cur, tgt, spd) =>
-      THREE.MathUtils.lerp(cur, tgt, dt * spd);
+    // Animation clip selection
+    if (action === 'walk') playClip(['walk', 'run', 'move', 'locomotion']);
+    if (action === 'repair') playClip(['idle', 'stand', 'repair', 'work']);
+    if (action === 'fly') playClip(['fly', 'float', 'hover', 'idle', 'swim']);
 
-    if (action === 'walk') {
-      // ── REALISTIC BIPEDAL WALK ────────────────────────────────────────
-      // Use X-axis rotation so limbs swing FORWARD/BACKWARD (depth-wise)
-      const walkHz = 2.0;   // comfortable pace
-      const phase = t * walkHz;
+    // Physics
+    const txW = targetPos.current.x * 5;
+    const tyW = targetPos.current.y * 3;
+    vel.current.x += (txW - worldPos.current.x) * dt * 1.9;
+    vel.current.y += (tyW - worldPos.current.y) * dt * 1.9;
+    vel.current.x *= Math.pow(0.87, dt * 60);
+    vel.current.y *= Math.pow(0.87, dt * 60);
+    worldPos.current.x += vel.current.x;
+    worldPos.current.y += vel.current.y;
 
-      // Legs: alternate forward/back like a real stride
-      leftLegRef.current.rotation.x = lr(leftLegRef.current.rotation.x, Math.sin(phase) * 0.38, 14);
-      rightLegRef.current.rotation.x = lr(rightLegRef.current.rotation.x, -Math.sin(phase) * 0.38, 14);
-      leftLegRef.current.rotation.z = lr(leftLegRef.current.rotation.z, 0, 5);
-      rightLegRef.current.rotation.z = lr(rightLegRef.current.rotation.z, 0, 5);
+    const breathe = Math.sin(t * 0.88) * 0.013;
+    const lr = (cur, tgt, spd) => THREE.MathUtils.lerp(cur, tgt, dt * spd);
 
-      // Arms swing opposite to same-side leg
-      leftArmRef.current.rotation.x = lr(leftArmRef.current.rotation.x, -Math.sin(phase) * 0.28, 12);
-      rightArmRef.current.rotation.x = lr(rightArmRef.current.rotation.x, Math.sin(phase) * 0.28, 12);
-      // Arms hang close to body
-      leftArmRef.current.rotation.z = lr(leftArmRef.current.rotation.z, 0.08, 5);
-      rightArmRef.current.rotation.z = lr(rightArmRef.current.rotation.z, -0.08, 5);
-
-      // Torso: very slight hip sway + gentle forward lean
-      bodyRef.current.rotation.x = lr(bodyRef.current.rotation.x, 0.06, 4);
-      bodyRef.current.rotation.z = Math.sin(phase) * 0.025;  // hip sway
-      // Micro-rise on each footfall (CG rises as leg straightens)
-      bodyRef.current.position.y = 0.2 + Math.abs(Math.sin(phase)) * 0.025 + breathe;
-
-      // Head stays level, very slight bob
-      headRef.current.rotation.x = lr(headRef.current.rotation.x, 0.05, 3);
-      headRef.current.rotation.y = lr(headRef.current.rotation.y, Math.sin(t * 0.4) * 0.07, 2);
-      headRef.current.position.y = 1 + breathe * 0.6;
-
-      groupRef.current.rotation.x = lr(groupRef.current.rotation.x, 0, 4);
-
+    if (action === 'fly') {
+      const dp = t * 0.3;
+      groupRef.current.position.set(
+        worldPos.current.x,
+        worldPos.current.y + Math.sin(dp) * 0.065 + Math.sin(dp * 1.7) * 0.022,
+        0,
+      );
+      groupRef.current.rotation.z = lr(groupRef.current.rotation.z, Math.sin(dp * 0.6) * 0.035, 1.2);
+      groupRef.current.rotation.x = lr(groupRef.current.rotation.x, -0.07, 2);
     } else if (action === 'repair') {
-      // ── MULTI-PHASE MECHANIC REPAIR ───────────────────────────────────
-      // Full realistic cycle: approach → examine → wrench work → inspect → wipe → back to work
-      const CYCLE = 16;   // seconds for one full repair loop
-      const ct = t % CYCLE;
-
-      // PHASE 0 (0–2.5s): Walk up, crouch slightly, lean in to examine
-      if (ct < 2.5) {
-        bodyRef.current.rotation.x = lr(bodyRef.current.rotation.x, 0.42, 3);
-        bodyRef.current.rotation.z = lr(bodyRef.current.rotation.z, 0, 5);
-        bodyRef.current.position.y = lr(bodyRef.current.position.y, -0.15 + breathe, 3);
-
-        // Right hand reaches forward-down to the component
-        rightArmRef.current.rotation.x = lr(rightArmRef.current.rotation.x, -1.1, 3);
-        rightArmRef.current.rotation.z = lr(rightArmRef.current.rotation.z, -0.2, 3);
-        // Left hand braces on knee / hovers near
-        leftArmRef.current.rotation.x = lr(leftArmRef.current.rotation.x, 0.2, 3);
-        leftArmRef.current.rotation.z = lr(leftArmRef.current.rotation.z, 0.25, 3);
-
-        // Head down, looking at the repair site
-        headRef.current.rotation.x = lr(headRef.current.rotation.x, 0.58, 3);
-        headRef.current.rotation.y = lr(headRef.current.rotation.y, 0, 3);
-        headRef.current.position.y = 1 + breathe;
-
-        // Legs slightly spread for stable stance
-        leftLegRef.current.rotation.x = lr(leftLegRef.current.rotation.x, 0.12, 3);
-        rightLegRef.current.rotation.x = lr(rightLegRef.current.rotation.x, -0.12, 3);
-        leftLegRef.current.rotation.z = lr(leftLegRef.current.rotation.z, 0.08, 3);
-        rightLegRef.current.rotation.z = lr(rightLegRef.current.rotation.z, 0.08, 3);
-
-        groupRef.current.rotation.x = lr(groupRef.current.rotation.x, 0.1, 2);
-
-        // PHASE 1 (2.5–8s): Active wrench / tool work
-        // Right arm makes small precise turning motions (like tightening bolts)
-      } else if (ct < 8) {
-        const wp = (ct - 2.5) * 3.5;  // local work phase
-
-        bodyRef.current.rotation.x = lr(bodyRef.current.rotation.x, 0.45, 2);
-        bodyRef.current.position.y = lr(bodyRef.current.position.y, -0.15 + breathe, 3);
-        // Very slight body push as force applied
-        bodyRef.current.rotation.z = Math.sin(wp * 2.1) * 0.018;
-
-        // Right arm: small tight oscillation – like turning a bolt with a wrench
-        const boltTurn = Math.sin(wp * 2.8) * 0.12;
-        const boltPush = Math.sin(wp * 1.4) * 0.06;
-        rightArmRef.current.rotation.x = lr(rightArmRef.current.rotation.x, -1.2 + boltPush, 10);
-        rightArmRef.current.rotation.z = lr(rightArmRef.current.rotation.z, -0.18 + boltTurn, 10);
-
-        // Left arm holds steady / braces – slight micro-tremor from force
-        leftArmRef.current.rotation.x = lr(leftArmRef.current.rotation.x, -0.75 + Math.sin(wp * 4) * 0.03, 7);
-        leftArmRef.current.rotation.z = lr(leftArmRef.current.rotation.z, 0.38, 4);
-
-        // Head mostly down, small look-up check every few seconds
-        const headLook = Math.max(0, Math.sin(wp * 0.6) * 0.18);
-        headRef.current.rotation.x = lr(headRef.current.rotation.x, 0.42 - headLook, 2);
-        headRef.current.rotation.y = lr(headRef.current.rotation.y, 0, 2);
-        headRef.current.position.y = 1 + breathe;
-
-        groupRef.current.rotation.x = lr(groupRef.current.rotation.x, 0.12, 2);
-
-        // PHASE 2 (8–11s): Stand back up, inspect the work
-      } else if (ct < 11) {
-        const ip = ct - 8;  // 0→3
-
-        bodyRef.current.rotation.x = lr(bodyRef.current.rotation.x, 0.02, 2);
-        bodyRef.current.rotation.z = lr(bodyRef.current.rotation.z, 0, 4);
-        bodyRef.current.position.y = lr(bodyRef.current.position.y, 0.2 + breathe, 3);
-
-        // Arms drop naturally to sides – like a mechanic stepping back
-        rightArmRef.current.rotation.x = lr(rightArmRef.current.rotation.x, 0.05, 2);
-        rightArmRef.current.rotation.z = lr(rightArmRef.current.rotation.z, -0.22, 2);
-        leftArmRef.current.rotation.x = lr(leftArmRef.current.rotation.x, 0.05, 2);
-        leftArmRef.current.rotation.z = lr(leftArmRef.current.rotation.z, 0.22, 2);
-
-        // Head tilts and slowly turns left-right – visually inspecting
-        headRef.current.rotation.x = lr(headRef.current.rotation.x, -0.05, 2);
-        headRef.current.rotation.y = Math.sin(ip * 0.9) * 0.22;  // head pans to inspect
-        headRef.current.position.y = 1 + breathe;
-
-        // Weight shift: slight lean to one side while thinking
-        groupRef.current.rotation.z = lr(groupRef.current.rotation.z, Math.sin(ip * 0.7) * 0.03, 1.5);
-        groupRef.current.rotation.x = lr(groupRef.current.rotation.x, 0, 2);
-
-        leftLegRef.current.rotation.x = lr(leftLegRef.current.rotation.x, 0.05, 2);
-        rightLegRef.current.rotation.x = lr(rightLegRef.current.rotation.x, -0.05, 2);
-        leftLegRef.current.rotation.z = lr(leftLegRef.current.rotation.z, 0, 3);
-        rightLegRef.current.rotation.z = lr(rightLegRef.current.rotation.z, 0, 3);
-
-        // PHASE 3 (11–13.5s): Wipe visor / glance at wrist display – human moment
-      } else if (ct < 13.5) {
-        const wp2 = ct - 11;  // 0→2.5
-
-        bodyRef.current.rotation.x = lr(bodyRef.current.rotation.x, 0.05, 2);
-        bodyRef.current.rotation.z = lr(bodyRef.current.rotation.z, 0, 4);
-        bodyRef.current.position.y = lr(bodyRef.current.position.y, 0.2 + breathe, 3);
-
-        // Right arm rises to visor – wipe / tap gesture
-        const wipe = Math.sin(wp2 * 1.8) * 0.15;
-        rightArmRef.current.rotation.x = lr(rightArmRef.current.rotation.x, -1.65 + wipe, 4);
-        rightArmRef.current.rotation.z = lr(rightArmRef.current.rotation.z, 0.45, 4);
-
-        // Left arm check wrist (diagnostic display)
-        leftArmRef.current.rotation.x = lr(leftArmRef.current.rotation.x, -0.8, 3);
-        leftArmRef.current.rotation.z = lr(leftArmRef.current.rotation.z, 0.55, 3);
-
-        // Head glances at wrist display, then back forward
-        headRef.current.rotation.x = lr(headRef.current.rotation.x, wp2 < 1.2 ? 0.25 : 0.05, 2);
-        headRef.current.rotation.y = lr(headRef.current.rotation.y, 0, 2);
-        headRef.current.position.y = 1 + breathe;
-
-        groupRef.current.rotation.z = lr(groupRef.current.rotation.z, 0, 3);
-
-        // PHASE 4 (13.5–16s): Lean back in, get to work again
-      } else {
-        const rp = ct - 13.5;  // 0→2.5
-
-        bodyRef.current.rotation.x = lr(bodyRef.current.rotation.x, 0.38, 3);
-        bodyRef.current.position.y = lr(bodyRef.current.position.y, -0.1 + breathe, 3);
-
-        rightArmRef.current.rotation.x = lr(rightArmRef.current.rotation.x, -1.0, 3);
-        rightArmRef.current.rotation.z = lr(rightArmRef.current.rotation.z, -0.18, 3);
-        leftArmRef.current.rotation.x = lr(leftArmRef.current.rotation.x, -0.65, 3);
-        leftArmRef.current.rotation.z = lr(leftArmRef.current.rotation.z, 0.35, 3);
-
-        headRef.current.rotation.x = lr(headRef.current.rotation.x, 0.5, 3);
-        headRef.current.rotation.y = lr(headRef.current.rotation.y, 0, 3);
-        headRef.current.position.y = 1 + breathe;
-
-        groupRef.current.rotation.x = lr(groupRef.current.rotation.x, 0.1, 2);
-      }
-
-    } else if (action === 'fly') {
-      // ── ZERO-G DRIFT: weightless, not bouncing ────────────────────────
-      const dp = t * 0.35;   // very slow drift frequency
-
-      // Tiny positional drift (astronaut micro-adjusts thrusters)
-      groupRef.current.position.y =
-        posRef.current.y + Math.sin(dp) * 0.06 + Math.sin(dp * 1.7) * 0.03;
-      // Gentle slow roll – zero-g rotation
-      groupRef.current.rotation.z = lr(groupRef.current.rotation.z, Math.sin(dp * 0.8) * 0.05, 1);
-      groupRef.current.rotation.x = lr(groupRef.current.rotation.x, -0.12, 2);
-
-      // Arms spread wide for balance / checking instruments
-      leftArmRef.current.rotation.x = lr(leftArmRef.current.rotation.x, 0.1 + Math.sin(dp * 1.2) * 0.04, 2);
-      leftArmRef.current.rotation.z = lr(leftArmRef.current.rotation.z, 0.55 + Math.sin(dp * 0.9) * 0.04, 2);
-      rightArmRef.current.rotation.x = lr(rightArmRef.current.rotation.x, 0.1 + Math.sin(dp * 1.1) * 0.04, 2);
-      rightArmRef.current.rotation.z = lr(rightArmRef.current.rotation.z, -(0.55 + Math.sin(dp * 0.8) * 0.04), 2);
-
-      // Legs loosely together – they drift slightly, no rigid hold
-      leftLegRef.current.rotation.x = lr(leftLegRef.current.rotation.x, 0.04 + Math.sin(dp * 1.3) * 0.03, 1.5);
-      rightLegRef.current.rotation.x = lr(rightLegRef.current.rotation.x, 0.04 + Math.sin(dp * 0.9) * 0.03, 1.5);
-      leftLegRef.current.rotation.z = lr(leftLegRef.current.rotation.z, 0, 2);
-      rightLegRef.current.rotation.z = lr(rightLegRef.current.rotation.z, 0, 2);
-
-      // Head slowly looks around – curious, alert
-      headRef.current.rotation.x = lr(headRef.current.rotation.x, -0.08, 1.5);
-      headRef.current.rotation.y = Math.sin(dp * 0.5) * 0.18;
-      headRef.current.position.y = 1 + breathe;
-
-      // Body breathes
-      bodyRef.current.rotation.x = lr(bodyRef.current.rotation.x, 0, 2);
-      bodyRef.current.position.y = lr(bodyRef.current.position.y, 0.2 + breathe, 2);
-    }
-
-    // ── 4. POSITION (non-fly actions) ──────────────────────────────────────
-    if (action !== 'fly') {
-      groupRef.current.position.set(posRef.current.x, posRef.current.y, 0);
+      groupRef.current.position.set(worldPos.current.x, worldPos.current.y + breathe, 0);
+      groupRef.current.rotation.x = lr(groupRef.current.rotation.x, 0.06, 2);
+      groupRef.current.rotation.z = lr(groupRef.current.rotation.z, 0, 3);
     } else {
-      groupRef.current.position.x = lr(groupRef.current.position.x, posRef.current.x, 2);
-      // y is set above for fly
+      const bob = Math.abs(Math.sin(t * 2.05)) * 0.022;
+      groupRef.current.position.set(worldPos.current.x, worldPos.current.y + bob + breathe, 0);
+      groupRef.current.rotation.x = lr(groupRef.current.rotation.x, 0, 3);
+      groupRef.current.rotation.z = lr(groupRef.current.rotation.z, 0, 4);
     }
 
-    // ── 5. BOOST: excited shimmy (replaces wild spin) ─────────────────────
+    // Boost shimmy
     if (boostRef.current > 0) {
-      const shimmy = Math.sin(t * 18) * boostRef.current * 0.04;
-      groupRef.current.rotation.z += shimmy;
-      boostRef.current = Math.max(0, boostRef.current - dt * 3);
-    } else if (action !== 'fly') {
-      groupRef.current.rotation.z = lr(groupRef.current.rotation.z, 0, 5);
+      groupRef.current.position.x += Math.sin(t * 22) * boostRef.current * 0.025;
+      boostRef.current = Math.max(0, boostRef.current - dt * 2.8);
     }
 
-    // ── 6. FACING DIRECTION ───────────────────────────────────────────────
-    const spd = Math.sqrt(velRef.current.x ** 2 + velRef.current.y ** 2);
-    if (spd > 0.004) {
-      const targetRY = velRef.current.x > 0 ? Math.PI / 2 : -Math.PI / 2;
-      groupRef.current.rotation.y = lr(groupRef.current.rotation.y, targetRY, 4);
-    } else {
-      // Idle: gently look left/right
+    // Facing direction
+    const spd = Math.hypot(vel.current.x, vel.current.y);
+    if (spd > 0.005) {
       groupRef.current.rotation.y = lr(
         groupRef.current.rotation.y,
-        Math.sin(t * 0.25) * 0.12,
-        2
+        vel.current.x > 0 ? Math.PI / 2 : -Math.PI / 2,
+        5,
+      );
+    } else {
+      groupRef.current.rotation.y = lr(
+        groupRef.current.rotation.y,
+        Math.sin(t * 0.21) * 0.11,
+        1.5,
       );
     }
+
+    // Hover scale
+    const ts = hovered ? 0.34 : 0.3;
+    groupRef.current.scale.setScalar(lr(groupRef.current.scale.x, ts, 10));
   });
 
-  // ── JSX ──────────────────────────────────────────────────────────────────
+  /* ── JSX ────────────────────────────────────────────────────────────── */
   return (
     <>
-      <Tether start={[-15, 10, -5]} end={posRef.current} />
+      <Tether worldPosRef={worldPos} />
 
       <group
         ref={groupRef}
-        scale={hovered ? 0.33 : 0.29}
+        scale={0.3}
         onPointerOver={() => setHovered(true)}
         onPointerOut={() => setHovered(false)}
         onClick={() => { boostRef.current = 1; }}
       >
-        {/* THOUGHT BUBBLE */}
-        <Html position={[0, 2.4, 0]} center distanceFactor={10}>
-          <motion.div
-            initial={{ scale: 0, opacity: 0 }}
-            animate={{ scale: 1, opacity: 1 }}
-            transition={{ duration: 0.4 }}
-            style={{
-              padding: '6px 14px',
-              borderRadius: '18px',
-              background: 'rgba(255,255,255,0.82)',
-              backdropFilter: 'blur(8px)',
-              border: '1px solid rgba(0,0,0,0.08)',
-              boxShadow: '0 4px 20px rgba(0,0,0,0.12)',
-              pointerEvents: 'none',
-              whiteSpace: 'nowrap',
-            }}
-          >
-            <p style={{ fontSize: '11px', fontWeight: 700, color: '#1a1a1a', margin: 0 }}>
-              {status}
-            </p>
-          </motion.div>
-          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', marginTop: '-3px' }}>
-            <div style={{ width: 6, height: 6, borderRadius: '50%', background: 'rgba(255,255,255,0.7)', marginBottom: 2 }} />
-            <div style={{ width: 4, height: 4, borderRadius: '50%', background: 'rgba(255,255,255,0.5)' }} />
+        {/* Dynamic lights */}
+        <pointLight position={[0, 1.55, 0.35]} color="#3a7fff" intensity={hovered ? 1.4 : 0.7} distance={3.5} decay={2} />
+        <pointLight position={[0, -0.7, -0.4]} color="#ff7b00" intensity={isFlying ? 2.2 : 0.18} distance={2.5} decay={2} />
+        <pointLight position={[0.42, 0.28, 0.3]} color="#aaddff" intensity={isRepairing ? 1.8 : 0} distance={2} decay={2} />
+
+        {/* Model */}
+        <primitive object={scene} />
+
+        {/* Tool */}
+        {isRepairing && <Wrench />}
+
+        {/* Particles */}
+        <WeldingSparks active={isRepairing} />
+        <ThrusterParticles active={isFlying} localOffset={[-0.13, -0.85, -0.38]} />
+        <ThrusterParticles active={isFlying} localOffset={[0.13, -0.85, -0.38]} />
+
+        {/* Thought bubble */}
+        <Html position={[0, 3.0, 0]} center distanceFactor={13}>
+          <AnimatePresence mode="wait">
+            <motion.div
+              key={status}
+              initial={{ opacity: 0, scale: 0.8, y: 8 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.8, y: -4 }}
+              transition={{ duration: 0.32, ease: [0.16, 1, 0.3, 1] }}
+              style={{
+                padding: '7px 16px',
+                borderRadius: '22px',
+                background: 'rgba(255,255,255,0.91)',
+                backdropFilter: 'blur(14px)',
+                WebkitBackdropFilter: 'blur(14px)',
+                border: '1px solid rgba(0,0,0,0.06)',
+                boxShadow: '0 8px 28px rgba(0,0,0,0.18)',
+                pointerEvents: 'none',
+                whiteSpace: 'nowrap',
+              }}
+            >
+              <p style={{
+                fontSize: '11px',
+                fontWeight: 700,
+                color: '#111',
+                margin: 0,
+                letterSpacing: '0.01em',
+                fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
+              }}>
+                {status}
+              </p>
+            </motion.div>
+          </AnimatePresence>
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', marginTop: '-2px' }}>
+            <div style={{ width: 7, height: 7, borderRadius: '50%', background: 'rgba(255,255,255,0.82)', marginBottom: 2 }} />
+            <div style={{ width: 4, height: 4, borderRadius: '50%', background: 'rgba(255,255,255,0.55)', marginBottom: 2 }} />
+            <div style={{ width: 2, height: 2, borderRadius: '50%', background: 'rgba(255,255,255,0.35)' }} />
           </div>
         </Html>
-
-        {/* Body */}
-        <mesh ref={bodyRef} position={[0, 0.2, 0]} geometry={geo.body} material={mat.suit} />
-
-        {/* Head + Visor */}
-        <mesh ref={headRef} position={[0, 1, 0]} geometry={geo.head} material={mat.helmet}>
-          <mesh position={[0, 0.04, 0.26]} geometry={geo.visor} material={mat.visor} />
-        </mesh>
-
-        {/* Left Arm */}
-        <group ref={leftArmRef} position={[-0.42, 0.52, 0]}>
-          <mesh position={[0, -0.3, 0]} geometry={geo.limb} material={mat.suit} />
-          <mesh position={[0, -0.64, 0]} geometry={geo.hand} material={mat.glove} />
-        </group>
-
-        {/* Right Arm */}
-        <group ref={rightArmRef} position={[0.42, 0.52, 0]}>
-          <mesh position={[0, -0.3, 0]} geometry={geo.limb} material={mat.suit} />
-          <mesh position={[0, -0.64, 0]} geometry={geo.hand} material={mat.glove} />
-        </group>
-
-        {/* Left Leg */}
-        <group ref={leftLegRef} position={[-0.16, -0.52, 0]}>
-          <mesh position={[0, -0.3, 0]} geometry={geo.limb} material={mat.suit} />
-          <mesh position={[0, -0.64, 0]} geometry={geo.boot} material={mat.boot} />
-        </group>
-
-        {/* Right Leg */}
-        <group ref={rightLegRef} position={[0.16, -0.52, 0]}>
-          <mesh position={[0, -0.3, 0]} geometry={geo.limb} material={mat.suit} />
-          <mesh position={[0, -0.64, 0]} geometry={geo.boot} material={mat.boot} />
-        </group>
-
-        {/* Jetpack */}
-        <mesh position={[0, 0.3, -0.38]} geometry={geo.jetpack} material={mat.jetpack} />
-        <mesh position={[-0.12, -0.05, -0.48]} geometry={geo.thruster} material={mat.thruster} />
-        <mesh position={[0.12, -0.05, -0.48]} geometry={geo.thruster} material={mat.thruster} />
       </group>
     </>
   );
-};
+}
 
-// ─── FLOATING DEBRIS ──────────────────────────────────────────────────────────
-const Debris = ({ count = 14 }) => {
-  const items = useMemo(() => {
-    const list = [];
-    for (let i = 0; i < count; i++) {
-      list.push({
-        pos: [(Math.random() - 0.5) * 20, (Math.random() - 0.5) * 18, (Math.random() - 0.5) * 8],
-        size: Math.random() * 0.18 + 0.04,
-        rx: Math.random() * 0.4,
-        ry: Math.random() * 0.3,
-      });
-    }
-    return list;
-  }, [count]);
+/* ═══════════════════════════════════════════════════════════════════════════
+   DEBRIS FIELD
+═══════════════════════════════════════════════════════════════════════════ */
+function DebrisField() {
+  const debris = useMemo(() =>
+    Array.from({ length: 16 }, (_, i) => ({
+      pos: [(Math.random() - 0.5) * 22, (Math.random() - 0.5) * 16, (Math.random() - 0.5) * 9],
+      size: Math.random() * 0.17 + 0.04,
+      rspd: [(Math.random() - 0.5) * 0.005, (Math.random() - 0.5) * 0.004, (Math.random() - 0.5) * 0.003],
+      col: i % 3 === 0 ? '#e4e4e4' : i % 3 === 1 ? '#1a6fdb' : '#5a5a5a',
+    })),
+    []);
+
+  const refs = useRef([]);
+
+  useFrame(() => {
+    refs.current.forEach((m, i) => {
+      if (!m) return;
+      m.rotation.x += debris[i].rspd[0];
+      m.rotation.y += debris[i].rspd[1];
+      m.rotation.z += debris[i].rspd[2];
+    });
+  });
 
   return (
     <>
-      {items.map((d, i) => (
-        <mesh key={i} position={d.pos} rotation={[d.rx, d.ry, 0]}>
+      {debris.map((d, i) => (
+        <mesh key={i} ref={el => { refs.current[i] = el; }} position={d.pos}>
           <dodecahedronGeometry args={[d.size, 0]} />
-          <meshStandardMaterial
-            color={i % 3 === 0 ? '#E5E5EA' : i % 3 === 1 ? '#0071E3' : '#555555'}
-            opacity={0.45}
-            transparent
-          />
+          <meshStandardMaterial color={d.col} metalness={0.45} roughness={0.55} transparent opacity={0.46} />
         </mesh>
       ))}
     </>
   );
-};
+}
 
-// ─── SCENE ROOT ───────────────────────────────────────────────────────────────
+/* ═══════════════════════════════════════════════════════════════════════════
+   LOADING PLACEHOLDER
+═══════════════════════════════════════════════════════════════════════════ */
+function Placeholder() {
+  const ref = useRef();
+  useFrame(({ clock }) => {
+    if (ref.current) ref.current.rotation.y = clock.getElapsedTime() * 0.5;
+  });
+  return (
+    <mesh ref={ref}>
+      <sphereGeometry args={[0.35, 16, 16]} />
+      <meshStandardMaterial color="#e0e0e0" metalness={0.3} roughness={0.7} transparent opacity={0.45} />
+    </mesh>
+  );
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   SCENE ROOT
+═══════════════════════════════════════════════════════════════════════════ */
 export default function SpaceStage() {
   const [hovered, setHovered] = useState(false);
 
   return (
-    <div className="fixed inset-0 pointer-events-none z-0">
-      <Canvas dpr={[1, 2]}>
+    <div style={{ position: 'fixed', inset: 0, zIndex: 0, pointerEvents: 'none' }}>
+      <Canvas
+        style={{ pointerEvents: 'auto' }}
+        dpr={[1, 2]}
+        gl={{ antialias: true, alpha: true, powerPreference: 'high-performance' }}
+        shadows
+      >
         <PerspectiveCamera makeDefault position={[0, 0, 8]} fov={50} />
-        <ambientLight intensity={0.7} />
-        <pointLight position={[10, 10, 10]} intensity={1.4} />
-        <spotLight position={[-10, 10, 10]} angle={0.15} penumbra={1} intensity={0.9} />
 
-        <Stars radius={100} depth={50} count={4500} factor={4} saturation={0} fade speed={0.8} />
+        {/* Scene lighting */}
+        <ambientLight intensity={0.5} />
+        <directionalLight
+          position={[8, 12, 6]}
+          intensity={2.2}
+          color="#fff8f0"
+          castShadow
+          shadow-mapSize-width={1024}
+          shadow-mapSize-height={1024}
+        />
+        <pointLight position={[-8, 5, 4]} color="#aaccff" intensity={0.85} distance={25} />
+        <pointLight position={[0, -6, -8]} color="#334466" intensity={0.35} distance={20} />
 
-        <AnimatedAstronaut hovered={hovered} setHovered={setHovered} />
-        <Debris count={14} />
+        <Stars radius={100} depth={50} count={5500} factor={4} saturation={0.1} fade speed={0.6} />
+
+        <Suspense fallback={<Placeholder />}>
+          <AstronautGLB hovered={hovered} setHovered={setHovered} />
+        </Suspense>
+
+        <DebrisField />
       </Canvas>
     </div>
   );
 }
+
+useGLTF.preload('/models/astronaut.glb');
