@@ -1,165 +1,122 @@
 'use client';
-import { useEffect, useRef, useState, useCallback } from 'react';
-import { motion } from 'framer-motion';
+import { useEffect, useRef, useCallback } from 'react';
 
 /**
- * Enhanced Autonomous Astronaut Brain
- * Smarter section detection with better behavior patterns
+ * Autonomous Astronaut Brain
+ * Decides which action/position the astronaut takes based on which
+ * section is most visible.  Uses realistic mechanic-flavoured status strings.
  */
 export default function AutonomousAstronautBrain() {
-    const [aiState, setAiState] = useState({
-        currentAction: 'walk',
-        targetSection: 'hero',
-        status: 'Initializing...',
-        confidence: 50,
-        issues: [],
-    });
-
     const stateRef = useRef({
-        lastAction: null,
         lastSection: null,
-        sectionChangeTime: Date.now(),
-        actionDuration: 0,
+        lastAction: null,
+        lastCycle: -1,
+        changedAt: Date.now(),
     });
 
-    // Detect which section is most visible
-    const detectCurrentSection = () => {
-        const sections = {
-            hero: document.getElementById('hero'),
-            projects: document.getElementById('projects'),
-            activity: document.getElementById('activity'),
-            skills: document.getElementById('skills'),
-            about: document.getElementById('about'),
-            contact: document.getElementById('contact'),
-        };
+    // ── Which section is most visible on screen ──────────────────────────────
+    const detectSection = useCallback(() => {
+        const ids = ['hero', 'projects', 'activity', 'skills', 'about', 'contact'];
+        let best = 'hero';
+        let bestVis = 0;
 
-        let closestSection = 'hero';
-        let closestDistance = Infinity;
-        let highestVisibility = 0;
-
-        Object.entries(sections).forEach(([name, element]) => {
-            if (!element) return;
-
-            const rect = element.getBoundingClientRect();
-            const viewportCenter = window.innerHeight / 2;
-            const distanceFromCenter = Math.abs(rect.top - viewportCenter);
-
-            // Check how much of section is visible
-            const visibleTop = Math.max(0, rect.top);
-            const visibleBottom = Math.min(window.innerHeight, rect.bottom);
-            const visibleHeight = Math.max(0, visibleBottom - visibleTop);
-            const visibility = visibleHeight / window.innerHeight;
-
-            if (visibility > highestVisibility) {
-                highestVisibility = visibility;
-                closestSection = name;
-                closestDistance = distanceFromCenter;
+        for (const id of ids) {
+            const el = document.getElementById(id);
+            if (!el) continue;
+            const { top, bottom } = el.getBoundingClientRect();
+            const visible = Math.max(
+                0,
+                Math.min(window.innerHeight, bottom) - Math.max(0, top)
+            );
+            const ratio = visible / window.innerHeight;
+            if (ratio > bestVis) {
+                bestVis = ratio;
+                best = id;
             }
-        });
+        }
+        return best;
+    }, []);
 
-        return closestSection;
-    };
-
-    // Determine action based on section with variety
-    const getActionForSection = (section) => {
-        const sectionBehaviors = {
-            hero: {
-                primary: { action: 'walk', target: { x: 0, y: 0.3 }, status: '🚶 Exploring hero section' },
-                secondary: { action: 'walk', target: { x: -0.3, y: 0.2 }, status: '🚶 Walking through intro' },
-                confidence: 90,
-            },
-            projects: {
-                primary: { action: 'repair', target: { x: 0.5, y: -0.2 }, status: '🔧 Fixing project cards' },
-                secondary: { action: 'walk', target: { x: -0.4, y: -0.3 }, status: '🔍 Inspecting projects' },
-                confidence: 85,
-            },
-            activity: {
-                primary: { action: 'fly', target: { x: 0, y: 0.9 }, status: '🚀 Flying over activity feed' },
-                secondary: { action: 'fly', target: { x: 0.4, y: 0.7 }, status: '🚀 Scanning data visualization' },
-                confidence: 95,
-            },
-            skills: {
-                primary: { action: 'walk', target: { x: -0.4, y: 0.1 }, status: '🚶 Analyzing skill tags' },
-                secondary: { action: 'repair', target: { x: 0.3, y: 0.2 }, status: '🔧 Optimizing skills' },
-                confidence: 80,
-            },
-            about: {
-                primary: { action: 'repair', target: { x: -0.6, y: -0.3 }, status: '🔧 Reviewing biography' },
-                secondary: { action: 'walk', target: { x: 0.2, y: -0.2 }, status: '🚶 Reading about section' },
-                confidence: 75,
-            },
-            contact: {
-                primary: { action: 'fly', target: { x: 0, y: 1 }, status: '🚀 Flying to contact form' },
-                secondary: { action: 'walk', target: { x: 0.5, y: 0.8 }, status: '📬 Ready to connect' },
-                confidence: 90,
-            },
+    // ── Section → behaviour map ───────────────────────────────────────────────
+    // Each section has several behaviour "slots" – they cycle every 8 s for variety
+    const getBehaviour = useCallback((section, cycle) => {
+        const map = {
+            hero: [
+                { action: 'walk', target: { x: 0.1, y: 0.3 }, status: '👨‍🚀 On patrol...' },
+                { action: 'walk', target: { x: -0.25, y: 0.25 }, status: '🔍 Checking systems' },
+                { action: 'fly', target: { x: 0.2, y: 0.5 }, status: '🚀 All systems nominal' },
+            ],
+            projects: [
+                { action: 'repair', target: { x: 0.45, y: -0.15 }, status: '🔧 Tightening module bolts' },
+                { action: 'repair', target: { x: -0.35, y: -0.2 }, status: '🔧 Calibrating components' },
+                { action: 'walk', target: { x: 0.0, y: -0.25 }, status: '🔍 Inspecting project deck' },
+            ],
+            activity: [
+                { action: 'fly', target: { x: 0.0, y: 0.8 }, status: '🚀 Scanning data feed' },
+                { action: 'fly', target: { x: 0.35, y: 0.65 }, status: '📡 Uplink active' },
+                { action: 'repair', target: { x: -0.1, y: 0.4 }, status: '🔧 Patching data pipe' },
+            ],
+            skills: [
+                { action: 'walk', target: { x: -0.4, y: 0.1 }, status: '🔍 Reading skill matrix' },
+                { action: 'repair', target: { x: 0.3, y: 0.15 }, status: '🔧 Upgrading subsystems' },
+                { action: 'walk', target: { x: 0.1, y: -0.05 }, status: '👨‍🚀 Tech check complete' },
+            ],
+            about: [
+                { action: 'repair', target: { x: -0.55, y: -0.25 }, status: '🔧 Running diagnostics' },
+                { action: 'walk', target: { x: 0.2, y: -0.2 }, status: '🔍 Reviewing mission log' },
+                { action: 'fly', target: { x: -0.1, y: 0.2 }, status: '🚀 Orbital overview' },
+            ],
+            contact: [
+                { action: 'fly', target: { x: 0.0, y: 0.9 }, status: '📡 Broadcasting signal' },
+                { action: 'walk', target: { x: 0.5, y: 0.7 }, status: '📬 Awaiting transmission' },
+                { action: 'repair', target: { x: -0.2, y: 0.5 }, status: '🔧 Checking comms array' },
+            ],
         };
 
-        const behavior = sectionBehaviors[section] || sectionBehaviors.hero;
+        const opts = map[section] ?? map.hero;
+        return opts[cycle % opts.length];
+    }, []);
 
-        // Alternate between primary and secondary for variety
-        const time = Date.now();
-        const cycle = Math.floor(time / 8000) % 2; // Alternate every 8 seconds
-        const selected = cycle === 0 ? behavior.primary : behavior.secondary;
+    // ── Main loop ─────────────────────────────────────────────────────────────
+    const tick = useCallback(() => {
+        const section = detectSection();
+        const now = Date.now();
+        const elapsed = now - stateRef.current.changedAt;
 
-        return {
-            ...selected,
-            confidence: behavior.confidence,
-        };
-    };
+        // Advance to next behaviour slot every 8 s within the same section
+        const cycle = Math.floor(now / 8000);
+        const { action, target, status } = getBehaviour(section, cycle);
 
-    // Main AI loop - Smart and adaptive
-    const runAILoop = useCallback(() => {
-        const section = detectCurrentSection();
-        const { action, target, status, confidence } = getActionForSection(section);
-
-        // Only send command if section changed or enough time passed
-        const timeSinceLastChange = Date.now() - stateRef.current.sectionChangeTime;
-        const shouldUpdate =
+        const changed =
             stateRef.current.lastSection !== section ||
             stateRef.current.lastAction !== action ||
-            timeSinceLastChange > 5000; // Update every 5 seconds even in same section
+            stateRef.current.lastCycle !== cycle ||
+            elapsed > 6000;
 
-        if (shouldUpdate) {
-            // Send command to astronaut
+        if (changed) {
             window.dispatchEvent(
                 new CustomEvent('astronaut-autonomous-action', {
-                    detail: {
-                        action,
-                        target,
-                        status,
-                        section,
-                    },
+                    detail: { action, target, status, section },
                 })
             );
 
             stateRef.current.lastSection = section;
             stateRef.current.lastAction = action;
-            stateRef.current.sectionChangeTime = Date.now();
-
-            console.log(`🧠 AI Decision: Section="${section}" → Action="${action}" (${confidence}% confidence)`);
+            stateRef.current.lastCycle = cycle;
+            stateRef.current.changedAt = now;
         }
 
-        // Occasional boosts for visual interest
-        if (Math.random() > 0.93) {
+        // Very rare random boost (≈4 % of ticks → sounds like ~1 per 30 s at 1.2 s interval)
+        if (Math.random() > 0.96) {
             window.dispatchEvent(new CustomEvent('astro-boost'));
-            console.log('⚡ Random boost!');
         }
+    }, [detectSection, getBehaviour]);
 
-        setAiState({
-            currentAction: action,
-            targetSection: section,
-            status,
-            confidence,
-        });
-    }, []); // Empty dependency array as it uses state updates and refs
-
-    // Initialize AI loop
     useEffect(() => {
-        runAILoop();
-        const interval = setInterval(runAILoop, 1200); // Run every 1.2 seconds
-        return () => clearInterval(interval);
-    }, [runAILoop]);
+        tick();
+        const id = setInterval(tick, 1200);
+        return () => clearInterval(id);
+    }, [tick]);
 
     return null;
 }
