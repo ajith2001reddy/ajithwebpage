@@ -1,0 +1,78 @@
+TS CHANGES PART 9 of 20
+==============================
+[MODIFIED] --- FILE: .\src\components\sections\About.jsx ---
+'use client';
+import { motion } from 'framer-motion';
+
+export default function About() {
+  return (
+    <section id="about" className="py-32 md:py-48 px-6 bg-transparent overflow-hidden">
+      <div className="max-w-7xl mx-auto">
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-24 items-start">
+          
+          {/* Visual Container */}
+          <motion.div
+            initial={{ opacity: 0, x: -30 }}
+            whileInView={{ opacity: 1, x: 0 }}
+            viewport={{ once: true }}
+            transition={{ duration: 1, ease: [0.16, 1, 0.3, 1] }}
+            className="relative aspect-square md:aspect-[4/5] rounded-[2.5rem] overflow-hidden bg-gray-50 dark:bg-gray-900 border border-gray-100 dark:border-gray-800"
+          >
+            <div className="absolute inset-0 bg-gradient-to-br from-blue-50 to-white dark:from-blue-900/10 dark:to-black flex items-center justify-center p-20">
+               {/* Minimalist Tech Icon or Shape instead of placeholder image */}
+               <div className="w-40 h-40 rounded-3xl bg-blue-600/10 dark:bg-blue-500/10 flex items-center justify-center border border-blue-500/20">
+                  <div className="w-12 h-12 rounded-lg bg-blue-600 animate-pulse" />
+               </div>
+            </div>
+          </motion.div>
+
+          {/* Text Content */}
+          <motion.div
+            initial={{ opacity: 0, x: 30 }}
+            whileInView={{ opacity: 1, x: 0 }}
+            viewport={{ once: true }}
+            transition={{ duration: 1, ease: [0.16, 1, 0.3, 1] }}
+            className="space-y-16"
+          >
+            <div className="space-y-8">
+              <p className="text-sm font-semibold text-blue-600 dark:text-blue-500 uppercase tracking-widest">
+                The Philosophy
+              </p>
+              <h2 className="text-5xl md:text-7xl font-bold text-black dark:text-white tracking-tighter leading-[0.95]">
+                Engineering <br className="hidden md:block" /> with intention.
+              </h2>
+            </div>
+
+            <div className="space-y-8 text-xl text-gray-500 dark:text-gray-400 font-normal leading-relaxed max-w-xl">
+              <p>
+                I'm a Computer Science graduate student with over 5 years of experience specialized in building <span className="text-black dark:text-white font-semibold">high-performance systems</span> and AI-driven platforms.
+              </p>
+              <p>
+                My approach focuses on the intersection of technical robustness and user-centric architecture. At TCS, I engineered a Denodo data virtualization ecosystem consolidating 50+ sources with zero downtime.
+              </p>
+              <p>
+                Currently, I'm exploring advanced ML scalability and distributed backend patterns at the University of Bridgeport.
+              </p>
+            </div>
+
+            {/* Education Summary */}
+            <div className="pt-16 border-t border-gray-100 dark:border-gray-800 space-y-10">
+              <span className="text-sm font-bold text-black dark:text-white uppercase tracking-tight">Academic Milestone</span>
+              <div className="space-y-8">
+                <div className="flex flex-col gap-2">
+                  <h4 className="text-lg font-bold text-black dark:text-white">MS in Computer Science</h4>
+                  <p className="text-sm text-gray-500 font-medium">University of Bridgeport · Expected 2026</p>
+                </div>
+                <div className="flex flex-col gap-2">
+                  <h4 className="text-lg font-bold text-black dark:text-white">B.Tech in ECE</h4>
+                  <p className="text-sm text-gray-500 font-medium">Karunya Institute · Graduated 2022</p>
+                </div>
+              </div>
+            </div>
+          </motion.div>
+        </div>
+      </div>
+    </section>
+  );
+}
+--- END OF .\src\components\sections\About.jsx ---

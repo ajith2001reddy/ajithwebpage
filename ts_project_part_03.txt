@@ -1,0 +1,188 @@
+TS CHANGES PART 3 of 20
+==============================
+[NEW] --- FILE: .\src\components\3d\SpaceStage.jsx ---
+'use client';
+import React, { useRef, useState, useMemo, useEffect } from 'react';
+import { Canvas, useFrame } from '@react-three/fiber';
+import { Stars, Float, PerspectiveCamera, Environment, useGLTF, useAnimations } from '@react-three/drei';
+import * as THREE from 'three';
+import { motion } from 'framer-motion';
+
+const Tether = ({ start, end }) => {
+  const lineRef = useRef();
+
+  useFrame(() => {
+    if (lineRef.current) {
+        const points = [
+            new THREE.Vector3(...start),
+            new THREE.Vector3((start[0] + end.x) / 2, (start[1] + end.y) / 2 + 1, (start[2] + end.z) / 2),
+            new THREE.Vector3(end.x, end.y, end.z)
+        ];
+        const curve = new THREE.QuadraticBezierCurve3(points[0], points[1], points[2]);
+        lineRef.current.geometry.setFromPoints(curve.getPoints(50));
+    }
+  });
+
+  return (
+    <line ref={lineRef}>
+      <bufferGeometry />
+      <lineBasicMaterial color="#545456" linewidth={1} transparent opacity={0.6} />
+    </line>
+  );
+};
+
+const ChibiAstronaut = () => {
+  const group = useRef();
+  const { scene, animations } = useGLTF('/models/astronaut.glb');
+  const { actions, names } = useAnimations(animations, group);
+  
+  const [hovered, setHovered] = useState(false);
+  const [boost, setBoost] = useState(0);
+  const [pos, setPos] = useState(new THREE.Vector3(0, 0, 0));
+  const [target, setTarget] = useState(null);
+  const [action, setAction] = useState('walk'); // walk, repair, fly
+
+  useEffect(() => {
+    // Attempt to play animation if it exists
+    const currentName = names.find(n => n.toLowerCase().includes(action)) || names[0];
+    if (actions[currentName]) {
+      actions[currentName].reset().fadeIn(0.5).play();
+      return () => actions[currentName].fadeOut(0.5);
+    }
+  }, [action, actions, names]);
+
+  useEffect(() => {
+    const handleBoost = () => setBoost(40);
+    const handleTarget = (e) => setTarget(e.detail);
+    const handleAction = (e) => setAction(e.detail);
+    window.addEventListener('astro-boost', handleBoost);
+    window.addEventListener('astro-target', handleTarget);
+    window.addEventListener('astro-action', handleAction);
+    return () => {
+      window.removeEventListener('astro-boost', handleBoost);
+      window.removeEventListener('astro-target', handleTarget);
+      window.removeEventListener('astro-action', handleAction);
+    };
+  }, []);
+
+  useFrame((state) => {
+    const t = state.clock.getElapsedTime();
+    if (group.current) {
+      // 1. Movement Logic
+      const mouseX = state.mouse.x * 5;
+      const mouseY = state.mouse.y * 3;
+      
+      const targetX = target ? (target.x * 5) : mouseX;
+      const targetY = target ? (target.y * 3) : (action === 'fly' ? 2 : mouseY);
+      
+      pos.x += (targetX - pos.x) * 0.02;
+      pos.y += (targetY - pos.y) * 0.02;
+      
+      group.current.position.set(pos.x, pos.y, 0);
+
+      // 2. Action States
+      if (action === 'repair') {
+        group.current.rotation.x = 0.5;
+      } else if (action === 'fly') {
+        group.current.rotation.x = -0.3;
+      } else {
+        group.current.rotation.x = 0;
+      }
+
+      // 3. Funny Boost/Spin
+      if (boost > 0) {
+        group.current.rotation.y += boost * 0.1;
+        setBoost(prev => Math.max(0, prev - 1));
+      } else {
+        group.current.rotation.y = Math.sin(t * 0.5) * 0.2;
+      }
+    }
+  });
+
+  return (
+    <>
+      <Tether start={[-15, 10, -5]} end={pos} />
+      <group 
+        ref={group} 
+        scale={hovered ? 0.35 : 0.3} 
+        onPointerOver={() => setHovered(true)} 
+        onPointerOut={() => setHovered(false)}
+        onClick={() => setBoost(60)}
+      >
+        <primitive object={scene} />
+      </group>
+    </>
+  );
+};
+
+const Debris = ({ count = 20 }) => {
+  const points = useMemo(() => {
+    const p = [];
+    for (let i = 0; i < count; i++) {
+      p.push({
+        position: [(Math.random() - 0.5) * 20, (Math.random() - 0.5) * 20, (Math.random() - 0.5) * 10],
+        size: Math.random() * 0.2 + 0.05,
+        speed: Math.random() * 0.01 + 0.005
+      });
+    }
+    return p;
+  }, [count]);
+
+  return (
+    <>
+      {points.map((pt, i) => (
+           <mesh position={pt.position}>
+              <dodecahedronGeometry args={[pt.size, 0]} />
+              <meshStandardMaterial color={i % 2 === 0 ? "#E5E5EA" : "#0071E3"} opacity={0.5} transparent />
+           </mesh>
+        </Float>
+      ))}
+    </>
+  );
+};
+
+const AstroControls = () => {
+  return (
+    <div className="fixed bottom-24 left-8 z-[100] flex flex-col gap-2 pointer-events-auto">
+      <motion.div 
+        initial={{ opacity: 0, x: -20 }}
+        animate={{ opacity: 1, x: 0 }}
+        className="bg-white/80 dark:bg-black/80 backdrop-blur-md border border-gray-200 dark:border-gray-800 p-4 rounded-3xl shadow-xl space-y-3"
+      >
+        <p className="text-[10px] font-bold text-gray-400 uppercase tracking-[0.2em] mb-2 px-2">Astronaut Commands</p>
+        <div className="flex flex-col gap-2">
+          {['walk', 'repair', 'fly'].map((a) => (
+            <button
+              onClick={() => window.dispatchEvent(new CustomEvent('astro-action', { detail: a }))}
+              className="px-4 py-2 text-[11px] font-bold uppercase tracking-widest bg-gray-50 dark:bg-gray-900 hover:bg-blue-600 hover:text-white dark:hover:bg-blue-600 transition-all rounded-xl"
+            >
+              {a}
+            </button>
+          ))}
+        </div>
+      </motion.div>
+    </div>
+  );
+};
+
+export default function SpaceStage() {
+  return (
+    <div className="fixed inset-0 pointer-events-none z-0">
+      <AstroControls />
+      <Canvas dpr={[1, 2]}>
+        <PerspectiveCamera makeDefault position={[0, 0, 8]} fov={50} />
+        <ambientLight intensity={0.5} />
+        <pointLight position={[10, 10, 10]} intensity={1.5} />
+        <spotLight position={[-10, 10, 10]} angle={0.15} penumbra={1} intensity={1} />
+        
+        <Stars radius={100} depth={50} count={5000} factor={4} saturation={0} fade speed={1} />
+
+        <ChibiAstronaut />
+        <Debris count={15} />
+
+        <Environment preset="city" />
+      </Canvas>
+    </div>
+  );
+}
+--- END OF .\src\components\3d\SpaceStage.jsx ---
