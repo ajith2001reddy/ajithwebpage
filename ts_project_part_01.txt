@@ -1,0 +1,126 @@
+TS CHANGES PART 1 of 20
+==============================
+[MODIFIED] --- FILE: .\ajithwebpage\src\components\AutonomousAstronautBrain.jsx ---
+'use client';
+import { useEffect, useRef, useCallback } from 'react';
+
+/**
+ * Autonomous Astronaut Brain
+ * Decides which action/position the astronaut takes based on which
+ * section is most visible.  Uses realistic mechanic-flavoured status strings.
+ */
+export default function AutonomousAstronautBrain() {
+    const stateRef = useRef({
+        lastSection: null,
+        lastAction: null,
+        lastCycle: -1,
+        changedAt: Date.now(),
+    });
+
+    // ── Which section is most visible on screen ──────────────────────────────
+    const detectSection = useCallback(() => {
+        const ids = ['hero', 'projects', 'activity', 'skills', 'about', 'contact'];
+        let best = 'hero';
+        let bestVis = 0;
+
+        for (const id of ids) {
+            const el = document.getElementById(id);
+            if (!el) continue;
+            const { top, bottom } = el.getBoundingClientRect();
+            const visible = Math.max(
+                0,
+                Math.min(window.innerHeight, bottom) - Math.max(0, top)
+            );
+            const ratio = visible / window.innerHeight;
+            if (ratio > bestVis) {
+                bestVis = ratio;
+                best = id;
+            }
+        }
+        return best;
+    }, []);
+
+    // ── Section → behaviour map ───────────────────────────────────────────────
+    // Each section has several behaviour "slots" – they cycle every 8 s for variety
+    const getBehaviour = useCallback((section, cycle) => {
+        const map = {
+            hero: [
+                { action: 'walk', target: { x: 0.1, y: 0.3 }, status: '👨‍🚀 On patrol...' },
+                { action: 'walk', target: { x: -0.25, y: 0.25 }, status: '🔍 Checking systems' },
+                { action: 'fly', target: { x: 0.2, y: 0.5 }, status: '🚀 All systems nominal' },
+            ],
+            projects: [
+                { action: 'repair', target: { x: 0.45, y: -0.15 }, status: '🔧 Tightening module bolts' },
+                { action: 'repair', target: { x: -0.35, y: -0.2 }, status: '🔧 Calibrating components' },
+                { action: 'walk', target: { x: 0.0, y: -0.25 }, status: '🔍 Inspecting project deck' },
+            ],
+            activity: [
+                { action: 'fly', target: { x: 0.0, y: 0.8 }, status: '🚀 Scanning data feed' },
+                { action: 'fly', target: { x: 0.35, y: 0.65 }, status: '📡 Uplink active' },
+                { action: 'repair', target: { x: -0.1, y: 0.4 }, status: '🔧 Patching data pipe' },
+            ],
+            skills: [
+                { action: 'walk', target: { x: -0.4, y: 0.1 }, status: '🔍 Reading skill matrix' },
+                { action: 'repair', target: { x: 0.3, y: 0.15 }, status: '🔧 Upgrading subsystems' },
+                { action: 'walk', target: { x: 0.1, y: -0.05 }, status: '👨‍🚀 Tech check complete' },
+            ],
+            about: [
+                { action: 'repair', target: { x: -0.55, y: -0.25 }, status: '🔧 Running diagnostics' },
+                { action: 'walk', target: { x: 0.2, y: -0.2 }, status: '🔍 Reviewing mission log' },
+                { action: 'fly', target: { x: -0.1, y: 0.2 }, status: '🚀 Orbital overview' },
+            ],
+            contact: [
+                { action: 'fly', target: { x: 0.0, y: 0.9 }, status: '📡 Broadcasting signal' },
+                { action: 'walk', target: { x: 0.5, y: 0.7 }, status: '📬 Awaiting transmission' },
+                { action: 'repair', target: { x: -0.2, y: 0.5 }, status: '🔧 Checking comms array' },
+            ],
+        };
+
+        const opts = map[section] ?? map.hero;
+        return opts[cycle % opts.length];
+    }, []);
+
+    // ── Main loop ─────────────────────────────────────────────────────────────
+    const tick = useCallback(() => {
+        const section = detectSection();
+        const now = Date.now();
+        const elapsed = now - stateRef.current.changedAt;
+
+        // Advance to next behaviour slot every 8 s within the same section
+        const cycle = Math.floor(now / 8000);
+        const { action, target, status } = getBehaviour(section, cycle);
+
+        const changed =
+            stateRef.current.lastSection !== section ||
+            stateRef.current.lastAction !== action ||
+            stateRef.current.lastCycle !== cycle ||
+            elapsed > 6000;
+
+        if (changed) {
+            window.dispatchEvent(
+                new CustomEvent('astronaut-autonomous-action', {
+                    detail: { action, target, status, section },
+                })
+            );
+
+            stateRef.current.lastSection = section;
+            stateRef.current.lastAction = action;
+            stateRef.current.lastCycle = cycle;
+            stateRef.current.changedAt = now;
+        }
+
+        // Very rare random boost (≈4 % of ticks → sounds like ~1 per 30 s at 1.2 s interval)
+        if (Math.random() > 0.96) {
+            window.dispatchEvent(new CustomEvent('astro-boost'));
+        }
+    }, [detectSection, getBehaviour]);
+
+    useEffect(() => {
+        tick();
+        const id = setInterval(tick, 1200);
+        return () => clearInterval(id);
+    }, [tick]);
+
+    return null;
+}
+--- END OF .\ajithwebpage\src\components\AutonomousAstronautBrain.jsx ---

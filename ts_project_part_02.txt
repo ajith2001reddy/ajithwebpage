@@ -1,3 +1,6 @@
+TS CHANGES PART 2 of 20
+==============================
+[MODIFIED] --- FILE: .\ajithwebpage\src\components\3d\SpaceStage.jsx ---
 'use client';
 /**
  * SpaceStage.jsx  –  Procedural NASA EMU Astronaut
@@ -33,7 +36,7 @@
  */
 
 import React, {
-  useRef, useState, useMemo, useEffect, Suspense,
+  useRef, useState, useMemo, useEffect,
 } from 'react';
 import { Canvas, useFrame } from '@react-three/fiber';
 import { Stars, PerspectiveCamera, Html } from '@react-three/drei';
@@ -54,6 +57,7 @@ const MAT = {
   panel: new THREE.MeshStandardMaterial({ color: '#909098', metalness: 0.55, roughness: 0.42 }),
   patch: new THREE.MeshStandardMaterial({ color: '#c09820', emissive: '#806010', emissiveIntensity: 0.3, metalness: 0.6, roughness: 0.4 }),
   dark: new THREE.MeshStandardMaterial({ color: '#484848', metalness: 0.7, roughness: 0.3 }),
+  inner: new THREE.MeshStandardMaterial({ color: '#e4e4e4', metalness: 0.0, roughness: 0.95 }),
 };
 
 /* ─── GEOMETRY CACHE ─────────────────────────────────────────────────────── */
@@ -530,7 +534,6 @@ function NASAAstronaut({ hovered, setHovered }) {
         onPointerOver={() => setHovered(true)}
         onPointerOut={() => setHovered(false)}
         onClick={() => { boostRef.current = 1; }}
-        onTouchStart={() => { boostRef.current = 1; }}
       >
         {/* ── Dynamic lights ── */}
         <pointLight position={[0, 1.65, 0.38]} color="#3a7fff" intensity={hovered ? 1.5 : 0.75} distance={3.5} decay={2} />
@@ -635,7 +638,6 @@ function NASAAstronaut({ hovered, setHovered }) {
         <Html position={[0, 3.1, 0]} center distanceFactor={13}>
           <AnimatePresence mode="wait">
             <motion.div
-              key={status}
               initial={{ opacity: 0, scale: 0.82, y: 8 }}
               animate={{ opacity: 1, scale: 1, y: 0 }}
               exit={{ opacity: 0, scale: 0.82, y: -5 }}
@@ -697,7 +699,6 @@ function DebrisField() {
   return (
     <>
       {items.map((d, i) => (
-        <mesh key={i} ref={el => { refs.current[i] = el; }} position={d.pos}>
           <dodecahedronGeometry args={[d.size, 0]} />
           <meshStandardMaterial color={d.col} metalness={0.44} roughness={0.56} transparent opacity={0.44} />
         </mesh>
@@ -709,66 +710,34 @@ function DebrisField() {
 /* ═══════════════════════════════════════════════════════════════════════════
    SCENE ROOT
 ═══════════════════════════════════════════════════════════════════════════ */
-
 export default function SpaceStage() {
   const [hovered, setHovered] = useState(false);
-
-  /* ── Mobile detection ───────────────────────────────────────────────────── */
-  const isMobile = typeof window !== 'undefined' && window.innerWidth < 768;
-
-  /* ── Accessibility: respect prefers-reduced-motion ─────────────────────── */
-  const prefersReduced =
-    typeof window !== 'undefined' &&
-    window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-
-  /* ── GPU disposal on unmount (all hooks before any early return) ─────────── */
-  useEffect(() => {
-    return () => {
-      Object.values(GEO).forEach(g => g.dispose());
-      Object.values(MAT).forEach(m => m.dispose());
-    };
-  }, []);
-
-  /* ── Early return for reduced-motion (after all hooks) ───────────────────── */
-  if (prefersReduced) {
-    return (
-      <div style={{
-        position: 'fixed', inset: 0, zIndex: 0,
-        display: 'flex', alignItems: 'center', justifyContent: 'center',
-        pointerEvents: 'none',
-      }}>
-        <span style={{ fontSize: 48 }}>👨‍🚀</span>
-      </div>
-    );
-  }
 
   return (
     <div style={{ position: 'fixed', inset: 0, zIndex: 0, pointerEvents: 'none' }}>
       <Canvas
         style={{ pointerEvents: 'auto' }}
-        dpr={[1, isMobile ? 1.5 : 2]}
+        dpr={[1, 2]}
         gl={{ antialias: true, alpha: true, powerPreference: 'high-performance' }}
         shadows
       >
-        <Suspense fallback={null}>
-          <PerspectiveCamera makeDefault position={[0, 0, 8]} fov={50} />
+        <PerspectiveCamera makeDefault position={[0, 0, 8]} fov={50} />
 
-          {/* Scene lighting */}
-          <ambientLight intensity={0.5} />
-          {/* Warm directional key – like ISS sunlight */}
-          <directionalLight position={[8, 12, 6]} intensity={2.2} color="#fff8f0" castShadow
-            shadow-mapSize-width={1024} shadow-mapSize-height={1024} />
-          {/* Cool Earth albedo fill */}
-          <pointLight position={[-8, 5, 4]} color="#aaccff" intensity={0.85} distance={25} />
-          {/* Deep space rim */}
-          <pointLight position={[0, -6, -8]} color="#334466" intensity={0.35} distance={20} />
+        {/* Scene lighting */}
+        <ambientLight intensity={0.5} />
+        <directionalLight position={[8, 12, 6]} intensity={2.2} color="#fff8f0" castShadow
+          shadow-mapSize-width={1024} shadow-mapSize-height={1024} />
+        {/* Cool Earth albedo fill */}
+        <pointLight position={[-8, 5, 4]} color="#aaccff" intensity={0.85} distance={25} />
+        {/* Deep space rim */}
+        <pointLight position={[0, -6, -8]} color="#334466" intensity={0.35} distance={20} />
 
-          <Stars radius={100} depth={50} count={isMobile ? 2000 : 5500} factor={4} saturation={0.1} fade speed={0.6} />
+        <Stars radius={100} depth={50} count={5500} factor={4} saturation={0.1} fade speed={0.6} />
 
-          <NASAAstronaut hovered={hovered} setHovered={setHovered} />
-          <DebrisField />
-        </Suspense>
+        <NASAAstronaut hovered={hovered} setHovered={setHovered} />
+        <DebrisField />
       </Canvas>
     </div>
   );
 }
+--- END OF .\ajithwebpage\src\components\3d\SpaceStage.jsx ---
