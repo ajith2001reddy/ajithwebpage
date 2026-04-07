@@ -4,19 +4,19 @@ import { motion } from 'framer-motion';
 const skillCategories = [
   {
     category: 'Languages',
-    skills: ['Python', 'JavaScript', 'TypeScript', 'SQL', 'C++'],
+    skills: ['Python', 'JavaScript', 'TypeScript', 'Java', 'SQL'],
   },
   {
     category: 'Backend & Infrastructure',
-    skills: ['FastAPI', 'Node.js', 'PostgreSQL', 'MongoDB', 'REST APIs', 'Microservices'],
+    skills: ['FastAPI', 'Node.js', 'REST APIs', 'Microservices', 'API Integration', 'ETL Pipelines'],
   },
   {
-    category: 'Cloud & Systems',
-    skills: ['Linux', 'Docker', 'Kubernetes', 'Distributed Systems', 'Observability'],
+    category: 'Cloud & DevOps',
+    skills: ['AWS', 'Azure', 'Docker', 'Kubernetes', 'CI/CD', 'GitHub Actions'],
   },
   {
     category: 'AI & Data Science',
-    skills: ['LLMs', 'RAG (LangChain)', 'FAISS', 'TensorFlow', 'NLP Scaling'],
+    skills: ['LangChain', 'LangGraph', 'LLM-as-a-Judge', 'RAG', 'Prompt Engineering', 'Vector Search'],
   },
 ];
 
