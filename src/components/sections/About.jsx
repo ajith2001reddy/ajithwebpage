@@ -42,13 +42,13 @@ export default function About() {
 
             <div className="space-y-8 text-xl text-gray-500 dark:text-gray-400 font-normal leading-relaxed max-w-xl">
               <p>
-                I&apos;m a Computer Science graduate student with over 5 years of experience specialized in building <span className="text-black dark:text-white font-semibold">high-performance systems</span> and AI-driven platforms.
+                I&apos;m a Computer Science master&apos;s student with 2+ years of software engineering experience building <span className="text-black dark:text-white font-semibold">enterprise data platforms</span> and AI-driven solutions.
               </p>
               <p>
-                My approach focuses on the intersection of technical robustness and user-centric architecture. At TCS, I engineered a Denodo data virtualization ecosystem consolidating 50+ sources with zero downtime.
+                My approach combines technical robustness with practical business impact. At TCS, I built intelligent monitoring, API integrations, and reliable data pipeline workflows for enterprise systems.
               </p>
               <p>
-                Currently, I&apos;m exploring advanced ML scalability and distributed backend patterns at the University of Bridgeport.
+                Currently, I focus on agentic workflows, LLM evaluation (LLM-as-a-judge), and reliable AI system testing at the University of Bridgeport.
               </p>
             </div>
 
